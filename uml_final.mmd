@@ -1,0 +1,52 @@
+classDiagram
+    class Owner {
+      +name: str
+      +pets: List[Pet]
+      +add_pet(pet)
+      +get_pet(pet_name)
+      +get_all_tasks(include_completed)
+      +to_dict()
+      +from_dict(data)
+      +save_to_json(file_path)
+      +load_from_json(file_path)
+    }
+
+    class Pet {
+      +name: str
+      +species: str
+      +tasks: List[Task]
+      +add_task(task)
+      +pending_tasks()
+      +to_dict()
+      +from_dict(data)
+    }
+
+    class Task {
+      +description: str
+      +time: str
+      +frequency: str
+      +priority: str
+      +duration_minutes: int
+      +due_date: date
+      +completed: bool
+      +mark_complete()
+      +to_dict()
+      +from_dict(data)
+    }
+
+    class Scheduler {
+      +owner: Owner
+      +get_schedule(include_completed)
+      +sort_by_time(records)
+      +sort_by_priority_then_time(records)
+      +filter_tasks(records, pet_name, completed)
+      +detect_conflicts(records)
+      +detect_time_overlap_conflicts(records)
+      +next_available_slot(target_date, duration_minutes, start_time, end_time)
+      +generate_time_blocked_plan(records)
+      +mark_task_complete(pet_name, task_index)
+    }
+
+    Owner "1" --> "many" Pet : has
+    Pet "1" --> "many" Task : has
+    Scheduler --> Owner : reads/manages
