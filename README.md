@@ -1,180 +1,176 @@
-# PawPal+ (Module 2 Project)
+# PawPal+ Applied AI System
 
-PawPal+ is a smart pet care management system that helps owners organize daily routines for multiple pets.
+PawPal+ started as a Module 2 pet-care scheduler and was extended into an applied AI system that turns natural-language pet-care requests into validated schedules. The final version uses an agentic plan-check-repair loop instead of RAG because the problem is about reasoning over constraints, not looking up outside knowledge.
 
-## Scenario
+## Original Project
 
-A busy pet owner needs help staying consistent with pet care. The app supports:
+**Original project:** PawPal+ from Module 2.
 
-- Tracking tasks such as feeding, walks, medications, and enrichment
-- Organizing tasks with time and priority constraints
-- Highlighting schedule conflicts before they cause issues
-- Automatically rescheduling recurring daily and weekly tasks
+The original PawPal+ project organized pet-care routines for multiple pets. It supported task creation, scheduling, sorting, filtering, recurring reminders, conflict detection, and JSON persistence through an object-oriented backend with a Streamlit UI.
 
-## Features
+## What This System Does
 
-- Object-oriented architecture with four core classes:
-	- `Task`
-	- `Pet`
-	- `Owner`
-	- `Scheduler`
-- Streamlit UI connected to the backend logic in `pawpal_system.py`
-- Multi-pet support
-- Sorted schedule by date, time, and priority
-- Filtering by pet and completion status
-- Recurring task automation (`daily`, `weekly`)
-- Conflict warnings for duplicate date/time slots
-- Overlap conflict detection using duration-aware windows
-- CLI demo script (`main.py`) to validate logic independently of UI
-- JSON persistence (`pawpal_data.json`) with save/reload/reset controls in the UI
-- Professional output formatting in both Streamlit and CLI (`tabulate` tables, status badges, emojis)
+PawPal+ now behaves like a small AI care planner:
 
-## Smarter Scheduling
+- it reads messy instructions such as "Mochi needs a morning walk at 08:00 and Luna needs medication after breakfast"
+- it converts those instructions into structured task drafts
+- it checks the plan against existing tasks for overlaps and exact conflicts
+- it repairs the schedule by shifting tasks forward in 15-minute increments
+- it reports a confidence score and explanation so the user can judge the result
+- it keeps human approval in the loop before applying the plan to the schedule
 
-The scheduling layer adds algorithmic intelligence:
+## Architecture Overview
 
-- Sort by date/time/priority to produce a predictable daily plan
-- Filter by pet name and completion state for focused views
-- Detect exact-time conflicts and display warnings
-- Detect duration-based overlapping tasks
-- Generate next recurring task instance when a recurring task is completed
-- Build a weighted priority schedule across all pets
-- Generate a time-blocked non-overlapping plan
-- Find the next available time slot in 15-minute increments
-
-## Stretch Features Completed
-
-### 1) Advanced Algorithmic Capability (+2)
-
-- Added `next_available_slot()` to compute the next free slot based on existing tasks and duration.
-- Added `generate_time_blocked_plan()` to automatically shift overlapping tasks while preserving priority.
-- Agent-mode style prompting used: constrained prompts that requested algorithm behavior, edge-case handling, and deterministic outputs.
-
-### 2) Data Persistence Layer (+2)
-
-- Implemented `Owner.save_to_json()` and `Owner.load_from_json()`.
-- UI now supports save/reload/reset of persistent data through `pawpal_data.json`.
-
-### 3) Advanced Scheduling Logic (+2)
-
-- Added weighted priority sorting (`sort_by_priority_then_time()`).
-- Added overlap detection with duration-aware conflict checking.
-- Added non-overlapping time-block plan generation.
-- Visible in both CLI and Streamlit UI.
-
-### 4) Professional UI and Output Formatting (+2)
-
-- Streamlit schedule uses badges/emojis for priority, status, and frequency.
-- Conflict and adjustment messages are surfaced with warning/info states.
-- CLI output uses structured tables with `tabulate`.
-
-### 5) Prompt/Model Strategy Comparison (+2)
-
-- Reflection includes a direct comparison of broad prompts vs constrained prompts for complex scheduler tasks and which produced more reliable code.
-
-## UML (Final)
-
-Final Mermaid source is in `uml_final.mmd`.
+The system is organized around a deterministic scheduler plus an agentic planning layer.
 
 ```mermaid
-classDiagram
-		class Owner {
-			+name: str
-			+pets: List[Pet]
-			+add_pet(pet)
-			+get_pet(pet_name)
-			+get_all_tasks(include_completed)
-		}
-
-		class Pet {
-			+name: str
-			+species: str
-			+tasks: List[Task]
-			+add_task(task)
-			+pending_tasks()
-		}
-
-		class Task {
-			+description: str
-			+time: str
-			+frequency: str
-			+priority: str
-			+duration_minutes: int
-			+due_date: date
-			+completed: bool
-			+mark_complete()
-		}
-
-		class Scheduler {
-			+owner: Owner
-			+get_schedule(include_completed)
-			+sort_by_time(records)
-			+filter_tasks(records, pet_name, completed)
-			+detect_conflicts(records)
-			+mark_task_complete(pet_name, task_index)
-		}
-
-		Owner "1" --> "many" Pet : has
-		Pet "1" --> "many" Task : has
-		Scheduler --> Owner : reads/manages
+flowchart LR
+    U[User / Pet Owner] --> UI[Streamlit UI]
+    UI --> AG[CarePlanAgent]
+    AG -->|Parse request| D[Task drafts]
+    AG -->|Validate against schedule| SCH[Scheduler]
+    SCH -->|Conflicts, overlaps, next slot| AG
+    AG -->|Confidence + explanation| UI
+    UI -->|Apply plan| OWN[Owner / Pet data]
+    OWN --> JSON[(pawpal_data.json)]
+    UI -->|CLI demo| CLI[main.py]
+    CLI --> AG
+    CLI --> SCH
+    UI -->|Tests and review| H[Human reviewer]
 ```
 
-## Project Structure
+The source diagram is also saved in [assets/pawpal_system_architecture.mmd](assets/pawpal_system_architecture.mmd).
 
-- `app.py`: Streamlit UI
-- `pawpal_system.py`: OOP backend and scheduler algorithms
-- `main.py`: CLI-first verification demo
-- `tests/test_pawpal.py`: pytest suite
-- `reflection.md`: design and AI collaboration reflection
-- `uml_final.mmd`: final UML source
+## Setup Instructions
 
-## Getting Started
+1. Create and activate the virtual environment from the project root.
 
-### Setup
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate  # Windows PowerShell
-pip install -r requirements.txt
+```powershell
+.\.venv\Scripts\activate
 ```
 
-### Run Streamlit App
+2. Install dependencies.
 
-```bash
-streamlit run app.py
+```powershell
+pip install -r .\ai110-module2show-pawpal-starter\requirements.txt
 ```
 
-### Run CLI Demo
+3. Run the Streamlit app.
 
-```bash
-python main.py
+```powershell
+streamlit run .\ai110-module2show-pawpal-starter\app.py
 ```
 
-## Testing PawPal+
+4. Run the CLI demo.
 
-Run tests with:
-
-```bash
-python -m pytest
+```powershell
+python .\ai110-module2show-pawpal-starter\main.py
 ```
 
-Test coverage includes:
+5. Run the tests.
 
-- Task completion status updates
-- Task addition behavior
-- Sorting correctness
-- Daily recurrence creation
-- Conflict detection for duplicate times
-- Duration-aware overlap conflict detection
-- Next available slot computation
-- JSON save/load round trip
-
-Confidence level: ★★★★☆ (4/5)
-
-## Demo
-
-Add a screenshot image file (for example `pawpal_demo.png`) and embed it here:
-
-```html
-<a href="/course_images/ai110/pawpal_demo.png" target="_blank"><img src='/course_images/ai110/pawpal_demo.png' title='PawPal App' width='' alt='PawPal App' class='center-block' /></a>
+```powershell
+python -m pytest .\ai110-module2show-pawpal-starter\tests\test_pawpal.py
 ```
+
+## Sample Interactions
+
+These examples match the current agentic planner behavior.
+
+### Example 1
+Input:
+```text
+Mochi needs a morning walk at 08:00 and Luna needs medication after breakfast.
+```
+Output:
+```text
+Confidence: 0.90
+TASK: Mochi walk 08:00 once medium 30
+TASK: Luna medication 08:30 once medium 10
+```
+
+### Example 2
+Input:
+```text
+Mochi needs a walk at 08:00 and Mochi needs feeding at 08:00.
+```
+Output:
+```text
+Confidence: 0.90
+TASK: Mochi walk 08:00 once medium 30
+TASK: Mochi feeding 08:30 once medium 15
+```
+
+### Example 3
+Input:
+```text
+Luna needs play time at 18:30 and Mochi needs a weekly training session after dinner.
+```
+Output:
+```text
+Confidence: 0.90
+TASK: Luna play time 18:30 once medium 20
+TASK: Mochi training 19:00 weekly medium 20
+```
+
+## Design Decisions
+
+I kept PawPal+ deterministic at the core and added a lightweight agentic layer on top. That was the right tradeoff because the system needs reliable scheduling more than open-ended generation.
+
+Important choices:
+
+- The planner uses structured heuristics instead of an external model API, which keeps the project reproducible and easy to grade.
+- The agent previews a plan first and only applies it after explicit human approval, which makes the workflow safer.
+- Conflict repair happens in 15-minute increments, which is not globally optimal but is understandable, explainable, and easy to test.
+- Confidence scoring is simple and visible, which makes the AI easier to trust.
+
+I did not add RAG because this project does not need external knowledge retrieval. The meaningful AI behavior is planning, validation, and repair.
+
+## Testing Summary
+
+The repository includes automated pytest coverage for the original scheduler and the new agentic planner.
+
+Current results:
+
+- 10/10 tests passing
+- recurrence generation works
+- exact conflict detection works
+- duration-based overlap detection works
+- next-available-slot search works
+- JSON persistence round-trip works
+- agentic planning generates multi-step task plans
+- agentic repair shifts overlapping tasks forward safely
+
+## Reflection and Ethics
+
+PawPal+ showed me that a trustworthy AI system is usually less about making the output look clever and more about constraining the behavior so it can be checked.
+
+Limitations and risks:
+
+- The planner is rule-based, so it can miss unusual phrasing.
+- It does not reason about medical safety, travel time, or real pet-health data.
+- It could be misused as if it were a veterinary assistant, so the README and UI should clearly frame it as a scheduling tool only.
+
+What surprised me:
+
+- The best reliability improvement came from forcing the agent to explain its own decisions and repair conflicts before the user applies the plan.
+- The system felt more professional once the AI was constrained by tests instead of improvising freely.
+
+AI collaboration:
+
+- Helpful suggestion: AI helped point me toward a deterministic scheduler with a separate planning layer instead of overengineering the app with retrieval.
+- Flawed suggestion: AI suggested a RAG-style architecture, but this problem does not require external document lookup, so that direction was rejected.
+
+## Portfolio Notes
+
+- GitHub repo: add your public repository link here.
+- This project shows that I can take a small prototype, redesign it into a clearer AI system, and validate it with tests and guardrails.
+
+## Project Files
+
+- [app.py](app.py) - Streamlit UI
+- [main.py](main.py) - CLI demo with agentic planning
+- [pawpal_system.py](pawpal_system.py) - core data model, scheduler, and care-planning agent
+- [tests/test_pawpal.py](tests/test_pawpal.py) - automated tests
+- [model_card.md](model_card.md) - reflection, ethics, and reliability summary
+- [assets/pawpal_system_architecture.mmd](assets/pawpal_system_architecture.mmd) - system architecture diagram source

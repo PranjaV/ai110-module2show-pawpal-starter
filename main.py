@@ -1,4 +1,4 @@
-from pawpal_system import Owner, Pet, Scheduler, Task
+from pawpal_system import CarePlanAgent, Owner, Pet, Scheduler, Task
 
 import importlib
 
@@ -54,6 +54,39 @@ def print_time_blocked_plan(title: str, plan_rows: list[dict[str, object]]) -> N
             print(" | ".join(str(item) for item in row))
 
 
+def print_agent_plan(title: str, request: str, result) -> None:
+    print(f"\n{title}")
+    print("-" * len(title))
+    print(f"Request: {request}")
+    print(f"Confidence: {result.confidence:.2f}")
+    print(result.explanation)
+    if result.warnings:
+        print("Warnings:")
+        for warning in result.warnings:
+            print(f"- {warning}")
+
+    rows = []
+    for pet_name, task in result.created_tasks:
+        rows.append(
+            [
+                pet_name,
+                task.description,
+                task.due_date.isoformat(),
+                task.time,
+                task.priority,
+                task.frequency,
+                task.duration_minutes,
+            ]
+        )
+
+    headers = ["Pet", "Task", "Date", "Time", "Priority", "Frequency", "Duration"]
+    if tabulate:
+        print(tabulate(rows, headers=headers, tablefmt="fancy_grid"))
+    else:
+        for row in rows:
+            print(" | ".join(str(item) for item in row))
+
+
 def run_demo() -> None:
     owner = Owner(name="Jordan")
 
@@ -69,6 +102,27 @@ def run_demo() -> None:
     luna.add_task(Task(description="Play time", time="18:30", priority="medium"))
 
     scheduler = Scheduler(owner)
+    agent = CarePlanAgent(owner, scheduler)
+
+    print("\nAgentic Care Planning Demo")
+    print("--------------------------")
+
+    requests = [
+        "Mochi needs a morning walk at 08:00 and Luna needs medication after breakfast.",
+        "Mochi needs an evening walk at 19:00 and Luna needs play time at 18:30.",
+        "Mochi needs feeding at 08:00 every day.",
+    ]
+
+    for request in requests:
+        result = agent.plan_care_request(request, target_date=owner.pets[0].tasks[0].due_date if owner.pets and owner.pets[0].tasks else None)
+        print_agent_plan("AI Plan Preview", request, result)
+
+        for pet_name, task in result.created_tasks:
+            pet = owner.get_pet(pet_name)
+            if pet is None:
+                pet = Pet(name=pet_name, species="other")
+                owner.add_pet(pet)
+            pet.add_task(task)
 
     full_schedule = scheduler.get_schedule(include_completed=False)
     print_schedule("Today's Schedule (Sorted)", full_schedule)

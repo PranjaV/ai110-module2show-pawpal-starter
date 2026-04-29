@@ -1,0 +1,14 @@
+flowchart LR
+    U[User / Pet Owner] --> UI[Streamlit UI]
+    UI --> AG[CarePlanAgent]
+    AG -->|Parse request| D[Task drafts]
+    AG -->|Validate against existing tasks| SCH[Scheduler]
+    SCH -->|Conflicts / overlaps / next slot| AG
+    AG -->|Confidence score + explanation| UI
+    AG -->|Preview plan| PR[Plan preview]
+    UI -->|Apply plan| OWN[Owner / Pet data]
+    OWN --> JSON[(pawpal_data.json)]
+    UI -->|CLI demo| CLI[main.py]
+    CLI --> AG
+    CLI --> SCH
+    UI -->|Tests and manual review| H[Human reviewer]

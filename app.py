@@ -1,8 +1,8 @@
 import streamlit as st
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
-from pawpal_system import Owner, Pet, Scheduler, Task
+from pawpal_system import AgentPlanResult, CarePlanAgent, Owner, Pet, Scheduler, Task
 
 DATA_FILE = Path("pawpal_data.json")
 
@@ -40,11 +40,74 @@ if "owner" not in st.session_state:
 if "scheduler" not in st.session_state:
     st.session_state.scheduler = Scheduler(st.session_state.owner)
 
+if "last_agent_plan" not in st.session_state:
+    st.session_state.last_agent_plan = None
+
 
 owner: Owner = st.session_state.owner
 scheduler: Scheduler = st.session_state.scheduler
+agent = CarePlanAgent(owner, scheduler)
 
 st.divider()
+
+st.subheader("AI Care Planner")
+st.caption("Describe pet-care needs in plain language and let the agent draft and validate a schedule.")
+
+with st.form("ai_care_planner_form"):
+    care_request = st.text_area(
+        "What do you want PawPal to plan?",
+        value="Mochi needs a morning walk at 08:00 and Luna needs medication after breakfast.",
+        height=100,
+    )
+    ai_target_date = st.date_input("Plan date", value=date.today())
+    generate_plan_clicked = st.form_submit_button("Generate AI Plan")
+
+if generate_plan_clicked:
+    try:
+        st.session_state.last_agent_plan = agent.plan_care_request(care_request, target_date=ai_target_date)
+        st.success("AI plan generated successfully.")
+    except Exception as exc:
+        st.session_state.last_agent_plan = None
+        st.error(f"Could not generate an AI plan: {exc}")
+
+last_plan: AgentPlanResult | None = st.session_state.last_agent_plan
+if last_plan is not None:
+    st.metric("Agent confidence", f"{last_plan.confidence:.2f}")
+    st.write(last_plan.explanation)
+
+    if last_plan.warnings:
+        for warning in last_plan.warnings:
+            st.warning(warning)
+    else:
+        st.info("The generated plan passed validation without remaining warnings.")
+
+    planned_preview = [
+        {
+            "Pet": pet_name,
+            "Task": task.description,
+            "Date": task.due_date.isoformat(),
+            "Time": task.time,
+            "Priority": task.priority,
+            "Frequency": task.frequency,
+            "Duration": task.duration_minutes,
+        }
+        for pet_name, task in last_plan.created_tasks
+    ]
+    if planned_preview:
+        st.dataframe(planned_preview, use_container_width=True)
+
+    if st.button("Apply AI Plan to Schedule"):
+        applied_count = 0
+        for pet_name, task in last_plan.created_tasks:
+            pet = owner.get_pet(pet_name)
+            if pet is None:
+                pet = Pet(name=pet_name, species="other")
+                owner.add_pet(pet)
+            pet.add_task(task)
+            applied_count += 1
+        st.session_state.last_agent_plan = None
+        st.success(f"Applied {applied_count} AI-generated task(s) to the schedule.")
+        st.rerun()
 
 st.subheader("Owner")
 owner.name = st.text_input("Owner name", value=owner.name)

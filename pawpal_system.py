@@ -1,11 +1,16 @@
+
 from __future__ import annotations
 
+import logging
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+
+logger = logging.getLogger(__name__)
 
 PRIORITY_ORDER: Dict[str, int] = {"high": 0, "medium": 1, "low": 2}
 PRIORITY_SCORE: Dict[str, int] = {"high": 3, "medium": 2, "low": 1}
@@ -385,3 +390,287 @@ class Scheduler:
             pet.add_task(next_task)
 
         return task
+
+
+@dataclass
+class AgentTaskDraft:
+    """Structured task proposal generated from a natural-language request."""
+
+    pet_name: str
+    description: str
+    time: str
+    priority: str = "medium"
+    frequency: str = "once"
+    duration_minutes: int = 15
+
+
+@dataclass
+class AgentPlanResult:
+    """Outcome of the planning and verification loop."""
+
+    request_text: str
+    target_date: date
+    confidence: float
+    drafts: List[AgentTaskDraft]
+    created_tasks: List[Tuple[str, Task]]
+    warnings: List[str]
+    explanation: str
+    used_auto_repair: bool
+
+
+class CarePlanAgent:
+    """Agentic planner that turns pet-care instructions into validated schedules."""
+
+    TIME_HINTS = {
+        "morning": "08:00",
+        "breakfast": "08:00",
+        "lunch": "12:30",
+        "afternoon": "15:00",
+        "evening": "18:00",
+        "dinner": "18:30",
+        "night": "20:30",
+        "bedtime": "21:00",
+    }
+
+    KEYWORD_LIBRARY = {
+        "walk": ("walk", 30),
+        "feed": ("feeding", 15),
+        "food": ("feeding", 15),
+        "medication": ("medication", 10),
+        "medicine": ("medication", 10),
+        "play": ("play time", 20),
+        "enrichment": ("enrichment", 20),
+        "groom": ("grooming", 30),
+        "bath": ("bath", 30),
+        "training": ("training", 20),
+        "vet": ("vet prep", 20),
+    }
+
+    def __init__(self, owner: Owner, scheduler: Scheduler):
+        self.owner = owner
+        self.scheduler = scheduler
+
+    def plan_care_request(self, request_text: str, target_date: Optional[date] = None) -> AgentPlanResult:
+        """Plan, validate, and repair a natural-language pet-care request."""
+        normalized_request = request_text.strip()
+        if not normalized_request:
+            raise ValueError("request_text cannot be empty")
+
+        plan_date = target_date or date.today()
+        drafts = self._parse_request(normalized_request)
+
+        if not drafts:
+            drafts = [
+                AgentTaskDraft(
+                    pet_name=self.owner.pets[0].name if self.owner.pets else "Jordan",
+                    description="General pet care check-in",
+                    time="09:00",
+                    priority="medium",
+                    frequency="once",
+                    duration_minutes=15,
+                )
+            ]
+
+        created_tasks: List[Tuple[str, Task]] = []
+        warnings: List[str] = []
+        used_auto_repair = False
+
+        for draft in drafts:
+            if self._resolve_pet(draft.pet_name) is None:
+                warnings.append(f"'{draft.pet_name}' is not in the current owner profile yet.")
+
+            task = Task(
+                description=draft.description,
+                time=draft.time,
+                priority=draft.priority,
+                frequency=draft.frequency,
+                duration_minutes=draft.duration_minutes,
+                due_date=plan_date,
+            )
+            created_tasks.append((draft.pet_name, task))
+
+        validation_records = self.owner.get_all_tasks(include_completed=False) + self._draft_records(created_tasks)
+        warnings.extend(self.scheduler.detect_conflicts(records=validation_records))
+        warnings.extend(self.scheduler.detect_time_overlap_conflicts(records=validation_records))
+
+        if warnings:
+            used_auto_repair = True
+            repaired_tasks: List[Tuple[str, Task]] = []
+            repaired_records: List[Tuple[Pet, Task]] = []
+            temporary_records = self.owner.get_all_tasks(include_completed=False)
+            for pet_name, task in created_tasks:
+                next_slot = self.scheduler.next_available_slot(
+                    target_date=task.due_date,
+                    duration_minutes=task.duration_minutes,
+                    start_time=task.time,
+                    records=temporary_records + repaired_records,
+                )
+                if next_slot and next_slot != task.time:
+                    logger.info(
+                        "Rescheduled task for %s from %s to %s after validation",
+                        pet_name,
+                        task.time,
+                        next_slot,
+                    )
+                    task.time = next_slot
+                repaired_tasks.append((pet_name, task))
+                repaired_records.append((self._resolve_pet(pet_name) or Pet(name=pet_name, species="other"), task))
+            created_tasks = repaired_tasks
+
+            validation_records = self.owner.get_all_tasks(include_completed=False) + repaired_records
+            warnings = self.scheduler.detect_conflicts(records=validation_records)
+            warnings.extend(self.scheduler.detect_time_overlap_conflicts(records=validation_records))
+
+        confidence = self._score_confidence(normalized_request, drafts, warnings, used_auto_repair)
+        explanation = self._build_explanation(normalized_request, drafts, warnings, used_auto_repair, confidence)
+
+        logger.info(
+            "Agent plan generated with confidence %.2f for request: %s",
+            confidence,
+            normalized_request,
+        )
+
+        return AgentPlanResult(
+            request_text=normalized_request,
+            target_date=plan_date,
+            confidence=confidence,
+            drafts=drafts,
+            created_tasks=created_tasks,
+            warnings=warnings,
+            explanation=explanation,
+            used_auto_repair=used_auto_repair,
+        )
+
+    def _parse_request(self, request_text: str) -> List[AgentTaskDraft]:
+        clauses = [
+            piece.strip()
+            for piece in re.split(r"(?:\band then\b|\bthen\b|\band\b|;|\n|\.)", request_text, flags=re.IGNORECASE)
+            if piece.strip()
+        ]
+        drafts: List[AgentTaskDraft] = []
+
+        for clause in clauses:
+            pet_name = self._extract_pet_name(clause)
+            description, duration_minutes = self._extract_task_description(clause)
+            time = self._extract_time(clause)
+            priority = self._extract_priority(clause)
+            frequency = self._extract_frequency(clause)
+
+            if pet_name is None and self.owner.pets:
+                pet_name = self.owner.pets[0].name
+            elif pet_name is None:
+                pet_name = "Jordan"
+
+            drafts.append(
+                AgentTaskDraft(
+                    pet_name=pet_name,
+                    description=description,
+                    time=time,
+                    priority=priority,
+                    frequency=frequency,
+                    duration_minutes=duration_minutes,
+                )
+            )
+
+        return drafts
+
+    def _extract_pet_name(self, text: str) -> Optional[str]:
+        for pet in self.owner.pets:
+            if re.search(rf"\b{re.escape(pet.name)}\b", text, flags=re.IGNORECASE):
+                return pet.name
+        return None
+
+    def _extract_task_description(self, text: str) -> Tuple[str, int]:
+        lowered = text.lower()
+        for keyword, (description, minutes) in self.KEYWORD_LIBRARY.items():
+            if keyword in lowered:
+                return description, minutes
+        return text.strip().capitalize(), 15
+
+    def _extract_time(self, text: str) -> str:
+        lowered = text.lower()
+        explicit_time = re.search(r"\b([01]?\d|2[0-3]):[0-5]\d\b", lowered)
+        if explicit_time:
+            return explicit_time.group(0)
+
+        relative_time = re.search(r"\bafter\s+([01]?\d|2[0-3])\b", lowered)
+        if relative_time:
+            hour = int(relative_time.group(1))
+            return f"{(hour + 1) % 24:02d}:00"
+
+        for keyword, mapped_time in self.TIME_HINTS.items():
+            if keyword in lowered:
+                return mapped_time
+
+        return "09:00"
+
+    def _extract_priority(self, text: str) -> str:
+        lowered = text.lower()
+        if "high priority" in lowered or "urgent" in lowered or "as soon as possible" in lowered:
+            return "high"
+        if "low priority" in lowered or "if possible" in lowered or "optional" in lowered:
+            return "low"
+        if "important" in lowered or "must" in lowered:
+            return "high"
+        return "medium"
+
+    def _extract_frequency(self, text: str) -> str:
+        lowered = text.lower()
+        if "every day" in lowered or "daily" in lowered:
+            return "daily"
+        if "every week" in lowered or "weekly" in lowered:
+            return "weekly"
+        return "once"
+
+    def _resolve_pet(self, pet_name: str) -> Optional[Pet]:
+        pet = self.owner.get_pet(pet_name)
+        if pet is not None:
+            return pet
+        return None
+
+    def _draft_records(self, draft_tasks: List[Tuple[str, Task]]) -> List[Tuple[Pet, Task]]:
+        records: List[Tuple[Pet, Task]] = []
+        for pet_name, task in draft_tasks:
+            pet = self._resolve_pet(pet_name) or Pet(name=pet_name, species="other")
+            records.append((pet, task))
+        return records
+
+    def _score_confidence(
+        self,
+        request_text: str,
+        drafts: List[AgentTaskDraft],
+        warnings: List[str],
+        used_auto_repair: bool,
+    ) -> float:
+        score = 0.55
+        if any(pet.name.lower() in request_text.lower() for pet in self.owner.pets):
+            score += 0.1
+        if any(re.search(r"\b\d{2}:\d{2}\b", draft.time) for draft in drafts):
+            score += 0.1
+        if all(draft.description and draft.description != request_text for draft in drafts):
+            score += 0.08
+        if not warnings:
+            score += 0.12
+        if used_auto_repair:
+            score -= 0.05
+        return max(0.0, min(1.0, round(score, 2)))
+
+    def _build_explanation(
+        self,
+        request_text: str,
+        drafts: List[AgentTaskDraft],
+        warnings: List[str],
+        used_auto_repair: bool,
+        confidence: float,
+    ) -> str:
+        parts = [
+            f"Parsed {len(drafts)} task request(s) from the instruction: '{request_text}'.",
+            f"Confidence score: {confidence:.2f}.",
+        ]
+        if used_auto_repair:
+            parts.append("The agent reviewed the generated plan and applied a repair pass to reduce schedule conflicts.")
+        if warnings:
+            parts.append("Remaining warnings: " + " | ".join(warnings))
+        else:
+            parts.append("No validation warnings remained after the planning pass.")
+        return " ".join(parts)

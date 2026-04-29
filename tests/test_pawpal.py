@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from pathlib import Path
 
-from pawpal_system import Owner, Pet, Scheduler, Task
+from pawpal_system import CarePlanAgent, Owner, Pet, Scheduler, Task
 
 
 def test_mark_complete_updates_status() -> None:
@@ -125,3 +125,45 @@ def test_owner_save_and_load_json_round_trip() -> None:
     assert len(loaded.pets) == 1
     assert loaded.pets[0].name == "Mochi"
     assert loaded.pets[0].tasks[0].description == "Feed"
+
+
+def test_agentic_planner_generates_multi_task_plan() -> None:
+    owner = Owner(name="Jordan")
+    mochi = Pet(name="Mochi", species="dog")
+    luna = Pet(name="Luna", species="cat")
+    owner.add_pet(mochi)
+    owner.add_pet(luna)
+
+    scheduler = Scheduler(owner)
+    agent = CarePlanAgent(owner, scheduler)
+
+    result = agent.plan_care_request(
+        "Mochi needs a morning walk at 08:00 and Luna needs medication after breakfast.",
+        target_date=date.today(),
+    )
+
+    assert len(result.created_tasks) == 2
+    assert result.confidence >= 0.7
+    assert result.warnings == []
+    assert result.created_tasks[0][1].time == "08:00"
+    assert result.created_tasks[1][1].time == "08:30"
+    assert result.used_auto_repair is True
+
+
+def test_agentic_planner_repairs_overlapping_tasks() -> None:
+    owner = Owner(name="Jordan")
+    mochi = Pet(name="Mochi", species="dog")
+    owner.add_pet(mochi)
+
+    scheduler = Scheduler(owner)
+    agent = CarePlanAgent(owner, scheduler)
+
+    result = agent.plan_care_request(
+        "Mochi needs a walk at 08:00 and Mochi needs feeding at 08:00.",
+        target_date=date.today(),
+    )
+
+    planned_times = [task.time for _, task in result.created_tasks]
+    assert planned_times[0] == "08:00"
+    assert planned_times[1] == "08:30"
+    assert result.used_auto_repair is True
